@@ -1,0 +1,497 @@
+"use client";
+
+import { useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+
+type Gender = "male" | "female";
+type ActivityLevel = "sedentary" | "light" | "moderate" | "very" | "extra";
+type Goal = "lose" | "maintain" | "gain";
+
+interface UserData {
+  age: string;
+  gender: Gender;
+  weight: string; // in lbs
+  height: string; // in inches
+  activityLevel: ActivityLevel;
+  goal: Goal;
+}
+
+interface Results {
+  bmr: number;
+  tdee: number;
+  targetCalories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+}
+
+interface CalculationSteps {
+  bmrSteps: string[];
+  tdeeSteps: string[];
+  calorieAdjustmentSteps: string[];
+  proteinSteps: string[];
+  fatSteps: string[];
+  carbSteps: string[];
+}
+
+const activityMultipliers = {
+  sedentary: { value: 1.2, label: "Sedentary (little or no exercise)" },
+  light: { value: 1.375, label: "Lightly active (exercise 1-3 days/week)" },
+  moderate: { value: 1.55, label: "Moderately active (exercise 3-5 days/week)" },
+  very: { value: 1.725, label: "Very active (exercise 6-7 days/week)" },
+  extra: { value: 1.9, label: "Extra active (physical job + exercise)" },
+};
+
+const goalAdjustments = {
+  lose: { value: -500, label: "Lose weight (-500 cal/day, ~1 lb/week)" },
+  maintain: { value: 0, label: "Maintain weight" },
+  gain: { value: 300, label: "Gain weight (+300 cal/day, ~0.6 lb/week)" },
+};
+
+export default function CalorieCalculator() {
+  const [userData, setUserData] = useState<UserData>({
+    age: "",
+    gender: "male",
+    weight: "",
+    height: "",
+    activityLevel: "moderate",
+    goal: "maintain",
+  });
+
+  const [results, setResults] = useState<Results | null>(null);
+  const [steps, setSteps] = useState<CalculationSteps | null>(null);
+
+  const calculateBMR = (weight: number, height: number, age: number, gender: Gender): { bmr: number; steps: string[] } => {
+    // Convert lbs to kg and inches to cm
+    const weightKg = weight * 0.453592;
+    const heightCm = height * 2.54;
+
+    const steps: string[] = [];
+    steps.push(`**Convert Units:**`);
+    steps.push(`Weight: ${weight} lbs × 0.453592 = ${weightKg.toFixed(2)} kg`);
+    steps.push(`Height: ${height} inches × 2.54 = ${heightCm.toFixed(2)} cm`);
+    steps.push("");
+
+    // Mifflin-St Jeor Equation
+    steps.push(`**Mifflin-St Jeor Equation:**`);
+    if (gender === "male") {
+      steps.push(`BMR = (10 × weight_kg) + (6.25 × height_cm) - (5 × age) + 5`);
+      const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+      steps.push(`BMR = (10 × ${weightKg.toFixed(2)}) + (6.25 × ${heightCm.toFixed(2)}) - (5 × ${age}) + 5`);
+      steps.push(`BMR = ${(10 * weightKg).toFixed(2)} + ${(6.25 * heightCm).toFixed(2)} - ${5 * age} + 5`);
+      steps.push(`BMR = ${bmr.toFixed(2)} calories/day`);
+      return { bmr, steps };
+    } else {
+      steps.push(`BMR = (10 × weight_kg) + (6.25 × height_cm) - (5 × age) - 161`);
+      const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+      steps.push(`BMR = (10 × ${weightKg.toFixed(2)}) + (6.25 × ${heightCm.toFixed(2)}) - (5 × ${age}) - 161`);
+      steps.push(`BMR = ${(10 * weightKg).toFixed(2)} + ${(6.25 * heightCm).toFixed(2)} - ${5 * age} - 161`);
+      steps.push(`BMR = ${bmr.toFixed(2)} calories/day`);
+      return { bmr, steps };
+    }
+  };
+
+  const calculateTDEE = (bmr: number, activityLevel: ActivityLevel): { tdee: number; steps: string[] } => {
+    const multiplier = activityMultipliers[activityLevel].value;
+    const steps: string[] = [];
+    steps.push(`**Total Daily Energy Expenditure (TDEE):**`);
+    steps.push(`Activity Level: ${activityMultipliers[activityLevel].label}`);
+    steps.push(`Multiplier: ${multiplier}`);
+    steps.push(`TDEE = BMR × Activity Multiplier`);
+    steps.push(`TDEE = ${bmr.toFixed(2)} × ${multiplier}`);
+    const tdee = bmr * multiplier;
+    steps.push(`TDEE = ${tdee.toFixed(2)} calories/day`);
+    return { tdee, steps };
+  };
+
+  const calculateTargetCalories = (tdee: number, goal: Goal): { targetCalories: number; steps: string[] } => {
+    const adjustment = goalAdjustments[goal].value;
+    const steps: string[] = [];
+    steps.push(`**Calorie Adjustment for Goal:**`);
+    steps.push(`Goal: ${goalAdjustments[goal].label}`);
+    steps.push(`Adjustment: ${adjustment >= 0 ? "+" : ""}${adjustment} calories`);
+    steps.push(`Target Calories = TDEE + Adjustment`);
+    steps.push(`Target Calories = ${tdee.toFixed(2)} ${adjustment >= 0 ? "+" : ""} ${adjustment}`);
+    const targetCalories = tdee + adjustment;
+    steps.push(`Target Calories = ${targetCalories.toFixed(2)} calories/day`);
+    return { targetCalories, steps };
+  };
+
+  const calculateMacros = (
+    targetCalories: number,
+    weight: number,
+    goal: Goal
+  ): {
+    protein: number;
+    fat: number;
+    carbs: number;
+    proteinSteps: string[];
+    fatSteps: string[];
+    carbSteps: string[];
+  } => {
+    const proteinSteps: string[] = [];
+    const fatSteps: string[] = [];
+    const carbSteps: string[] = [];
+
+    // Protein: 0.8-1g per lb of body weight (higher for fat loss)
+    const proteinPerLb = goal === "lose" ? 1.0 : goal === "gain" ? 0.9 : 0.8;
+    proteinSteps.push(`**Protein Calculation:**`);
+    proteinSteps.push(`Recommendation: ${proteinPerLb}g per lb of body weight`);
+    proteinSteps.push(`Protein = ${weight} lbs × ${proteinPerLb}g/lb`);
+    const proteinGrams = weight * proteinPerLb;
+    proteinSteps.push(`Protein = ${proteinGrams.toFixed(1)}g`);
+    const proteinCalories = proteinGrams * 4;
+    proteinSteps.push(`Protein Calories = ${proteinGrams.toFixed(1)}g × 4 cal/g = ${proteinCalories.toFixed(1)} calories`);
+
+    // Fat: 25-30% of total calories
+    const fatPercentage = 0.28;
+    fatSteps.push(`**Fat Calculation:**`);
+    fatSteps.push(`Recommendation: ${(fatPercentage * 100).toFixed(0)}% of total calories`);
+    fatSteps.push(`Fat Calories = ${targetCalories.toFixed(2)} × ${fatPercentage}`);
+    const fatCalories = targetCalories * fatPercentage;
+    fatSteps.push(`Fat Calories = ${fatCalories.toFixed(1)} calories`);
+    const fatGrams = fatCalories / 9;
+    fatSteps.push(`Fat = ${fatCalories.toFixed(1)} ÷ 9 cal/g = ${fatGrams.toFixed(1)}g`);
+
+    // Carbs: Remaining calories
+    carbSteps.push(`**Carbohydrate Calculation:**`);
+    carbSteps.push(`Carbs fill the remaining calories`);
+    const carbCalories = targetCalories - proteinCalories - fatCalories;
+    carbSteps.push(`Carb Calories = Total - Protein - Fat`);
+    carbSteps.push(`Carb Calories = ${targetCalories.toFixed(2)} - ${proteinCalories.toFixed(1)} - ${fatCalories.toFixed(1)}`);
+    carbSteps.push(`Carb Calories = ${carbCalories.toFixed(1)} calories`);
+    const carbGrams = carbCalories / 4;
+    carbSteps.push(`Carbs = ${carbCalories.toFixed(1)} ÷ 4 cal/g = ${carbGrams.toFixed(1)}g`);
+
+    return {
+      protein: proteinGrams,
+      fat: fatGrams,
+      carbs: carbGrams,
+      proteinSteps,
+      fatSteps,
+      carbSteps,
+    };
+  };
+
+  const handleCalculate = () => {
+    const weight = parseFloat(userData.weight);
+    const height = parseFloat(userData.height);
+    const age = parseInt(userData.age);
+
+    if (!weight || !height || !age) {
+      alert("Please fill in all fields with valid numbers");
+      return;
+    }
+
+    // Calculate BMR
+    const { bmr, steps: bmrSteps } = calculateBMR(weight, height, age, userData.gender);
+
+    // Calculate TDEE
+    const { tdee, steps: tdeeSteps } = calculateTDEE(bmr, userData.activityLevel);
+
+    // Calculate Target Calories
+    const { targetCalories, steps: calorieAdjustmentSteps } = calculateTargetCalories(tdee, userData.goal);
+
+    // Calculate Macros
+    const { protein, fat, carbs, proteinSteps, fatSteps, carbSteps } = calculateMacros(
+      targetCalories,
+      weight,
+      userData.goal
+    );
+
+    setResults({
+      bmr,
+      tdee,
+      targetCalories,
+      protein,
+      fat,
+      carbs,
+    });
+
+    setSteps({
+      bmrSteps,
+      tdeeSteps,
+      calorieAdjustmentSteps,
+      proteinSteps,
+      fatSteps,
+      carbSteps,
+    });
+  };
+
+  return (
+    <div className="w-full max-w-6xl mx-auto space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Calorie & Macro Calculator</CardTitle>
+          <CardDescription>Enter your information to calculate your daily calorie and macronutrient needs</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label htmlFor="age">Age</Label>
+              <Input
+                id="age"
+                type="number"
+                placeholder="25"
+                value={userData.age}
+                onChange={(e) => setUserData({ ...userData, age: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="gender">Gender</Label>
+              <Select value={userData.gender} onValueChange={(value: Gender) => setUserData({ ...userData, gender: value })}>
+                <SelectTrigger id="gender">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="weight">Weight (lbs)</Label>
+              <Input
+                id="weight"
+                type="number"
+                placeholder="150"
+                value={userData.weight}
+                onChange={(e) => setUserData({ ...userData, weight: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="height">Height (inches)</Label>
+              <Input
+                id="height"
+                type="number"
+                placeholder="68"
+                value={userData.height}
+                onChange={(e) => setUserData({ ...userData, height: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity">Activity Level</Label>
+              <Select
+                value={userData.activityLevel}
+                onValueChange={(value: ActivityLevel) => setUserData({ ...userData, activityLevel: value })}
+              >
+                <SelectTrigger id="activity">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(activityMultipliers).map(([key, { label }]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="goal">Goal</Label>
+              <Select value={userData.goal} onValueChange={(value: Goal) => setUserData({ ...userData, goal: value })}>
+                <SelectTrigger id="goal">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(goalAdjustments).map(([key, { label }]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <Button onClick={handleCalculate} className="w-full mt-6">
+            Calculate
+          </Button>
+        </CardContent>
+      </Card>
+
+      {results && steps && (
+        <Tabs defaultValue="results" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="results">Results</TabsTrigger>
+            <TabsTrigger value="advanced">Advanced Details</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="results" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Your Results</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                    <div className="text-sm text-muted-foreground">BMR</div>
+                    <div className="text-2xl font-bold">{results.bmr.toFixed(0)}</div>
+                    <div className="text-xs text-muted-foreground">calories/day</div>
+                  </div>
+                  <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                    <div className="text-sm text-muted-foreground">TDEE</div>
+                    <div className="text-2xl font-bold">{results.tdee.toFixed(0)}</div>
+                    <div className="text-xs text-muted-foreground">calories/day</div>
+                  </div>
+                  <div className="p-4 bg-purple-50 dark:bg-purple-950 rounded-lg">
+                    <div className="text-sm text-muted-foreground">Target Calories</div>
+                    <div className="text-2xl font-bold">{results.targetCalories.toFixed(0)}</div>
+                    <div className="text-xs text-muted-foreground">calories/day</div>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Daily Macronutrients</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-4 border rounded-lg">
+                      <div className="text-sm text-muted-foreground">Protein</div>
+                      <div className="text-3xl font-bold text-red-600">{results.protein.toFixed(1)}g</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {(results.protein * 4).toFixed(0)} calories (4 cal/g)
+                      </div>
+                    </div>
+                    <div className="p-4 border rounded-lg">
+                      <div className="text-sm text-muted-foreground">Fat</div>
+                      <div className="text-3xl font-bold text-yellow-600">{results.fat.toFixed(1)}g</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {(results.fat * 9).toFixed(0)} calories (9 cal/g)
+                      </div>
+                    </div>
+                    <div className="p-4 border rounded-lg">
+                      <div className="text-sm text-muted-foreground">Carbohydrates</div>
+                      <div className="text-3xl font-bold text-blue-600">{results.carbs.toFixed(1)}g</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {(results.carbs * 4).toFixed(0)} calories (4 cal/g)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-muted rounded-lg">
+                  <h4 className="font-semibold mb-2">Summary</h4>
+                  <p className="text-sm text-muted-foreground">
+                    To {userData.goal === "lose" ? "lose weight" : userData.goal === "gain" ? "gain weight" : "maintain your weight"}, 
+                    consume <span className="font-bold text-foreground">{results.targetCalories.toFixed(0)} calories</span> per day with{" "}
+                    <span className="font-bold text-red-600">{results.protein.toFixed(0)}g protein</span>,{" "}
+                    <span className="font-bold text-yellow-600">{results.fat.toFixed(0)}g fat</span>, and{" "}
+                    <span className="font-bold text-blue-600">{results.carbs.toFixed(0)}g carbs</span>.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="advanced" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Formula Breakdown</CardTitle>
+                <CardDescription>
+                  Detailed step-by-step calculations showing how we arrived at your results
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-blue-600">1. Basal Metabolic Rate (BMR)</h3>
+                  <div className="pl-4 space-y-1 font-mono text-sm">
+                    {steps.bmrSteps.map((step, i) => (
+                      <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                        {step.replace(/\*\*/g, "")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-green-600">2. Total Daily Energy Expenditure (TDEE)</h3>
+                  <div className="pl-4 space-y-1 font-mono text-sm">
+                    {steps.tdeeSteps.map((step, i) => (
+                      <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                        {step.replace(/\*\*/g, "")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-purple-600">3. Target Calorie Adjustment</h3>
+                  <div className="pl-4 space-y-1 font-mono text-sm">
+                    {steps.calorieAdjustmentSteps.map((step, i) => (
+                      <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                        {step.replace(/\*\*/g, "")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t pt-6">
+                  <h3 className="text-xl font-semibold mb-4">Macronutrient Distribution</h3>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <h4 className="text-lg font-semibold text-red-600">Protein</h4>
+                      <div className="pl-4 space-y-1 font-mono text-sm">
+                        {steps.proteinSteps.map((step, i) => (
+                          <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                            {step.replace(/\*\*/g, "")}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-lg font-semibold text-yellow-600">Fat</h4>
+                      <div className="pl-4 space-y-1 font-mono text-sm">
+                        {steps.fatSteps.map((step, i) => (
+                          <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                            {step.replace(/\*\*/g, "")}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-lg font-semibold text-blue-600">Carbohydrates</h4>
+                      <div className="pl-4 space-y-1 font-mono text-sm">
+                        {steps.carbSteps.map((step, i) => (
+                          <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                            {step.replace(/\*\*/g, "")}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-muted p-4 rounded-lg">
+                  <h4 className="font-semibold mb-2">Verification</h4>
+                  <div className="font-mono text-sm space-y-1">
+                    <div>Protein: {results.protein.toFixed(1)}g × 4 cal/g = {(results.protein * 4).toFixed(1)} calories</div>
+                    <div>Fat: {results.fat.toFixed(1)}g × 9 cal/g = {(results.fat * 9).toFixed(1)} calories</div>
+                    <div>Carbs: {results.carbs.toFixed(1)}g × 4 cal/g = {(results.carbs * 4).toFixed(1)} calories</div>
+                    <div className="border-t pt-1 mt-1 font-bold">
+                      Total: {((results.protein * 4) + (results.fat * 9) + (results.carbs * 4)).toFixed(1)} calories
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      (Should match target: {results.targetCalories.toFixed(1)} calories)
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      )}
+    </div>
+  );
+}
