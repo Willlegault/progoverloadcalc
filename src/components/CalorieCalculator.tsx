@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 
 type Gender = "male" | "female";
-type ActivityLevel = "sedentary" | "light" | "moderate" | "very" | "extra";
+type ExerciseFrequency = "1" | "2" | "3" | "4" | "5";
 type Goal = "lose" | "maintain" | "gain";
 
 interface UserData {
@@ -17,12 +17,15 @@ interface UserData {
   gender: Gender;
   weight: string; // in lbs
   height: string; // in inches
-  activityLevel: ActivityLevel;
+  exerciseFrequency: ExerciseFrequency;
   goal: Goal;
 }
 
 interface Results {
   bmr: number;
+  tef: number;
+  eee: number;
+  neat: number;
   tdee: number;
   targetCalories: number;
   protein: number;
@@ -32,6 +35,9 @@ interface Results {
 
 interface CalculationSteps {
   bmrSteps: string[];
+  tefSteps: string[];
+  eeeSteps: string[];
+  neatSteps: string[];
   tdeeSteps: string[];
   calorieAdjustmentSteps: string[];
   proteinSteps: string[];
@@ -39,12 +45,12 @@ interface CalculationSteps {
   carbSteps: string[];
 }
 
-const activityMultipliers = {
-  sedentary: { value: 1.2, label: "Sedentary (little or no exercise)" },
-  light: { value: 1.375, label: "Lightly active (exercise 1-3 days/week)" },
-  moderate: { value: 1.55, label: "Moderately active (exercise 3-5 days/week)" },
-  very: { value: 1.725, label: "Very active (exercise 6-7 days/week)" },
-  extra: { value: 1.9, label: "Extra active (physical job + exercise)" },
+const exerciseFrequencyOptions = {
+  "1": "1 day per week",
+  "2": "2 days per week",
+  "3": "3 days per week",
+  "4": "4 days per week",
+  "5": "5+ days per week",
 };
 
 const goalAdjustments = {
@@ -59,7 +65,7 @@ export default function CalorieCalculator() {
     gender: "male",
     weight: "",
     height: "",
-    activityLevel: "moderate",
+    exerciseFrequency: "3",
     goal: "maintain",
   });
 
@@ -96,15 +102,56 @@ export default function CalorieCalculator() {
     }
   };
 
-  const calculateTDEE = (bmr: number, activityLevel: ActivityLevel): { tdee: number; steps: string[] } => {
-    const multiplier = activityMultipliers[activityLevel].value;
+  const calculateTEF = (bmr: number): { tef: number; steps: string[] } => {
+    const steps: string[] = [];
+    steps.push(`**Thermic Effect of Feeding (TEF):**`);
+    steps.push(`TEF represents calories burned during digestion (10% of BMR)`);
+    steps.push(`TEF = 0.1 × BMR`);
+    steps.push(`TEF = 0.1 × ${bmr.toFixed(2)}`);
+    const tef = 0.1 * bmr;
+    steps.push(`TEF = ${tef.toFixed(2)} calories/day`);
+    return { tef, steps };
+  };
+
+  const calculateEEE = (weightKg: number, exerciseFrequency: ExerciseFrequency): { eee: number; steps: string[] } => {
+    const steps: string[] = [];
+    const f = parseInt(exerciseFrequency);
+    steps.push(`**Exercise Energy Expenditure (EEE):**`);
+    steps.push(`Formula for one workout: EEE = ((3.5 × 3.5 × weight_kg) / 200) × 60 × f`);
+    steps.push(`where f = exercise frequency per week`);
+    steps.push(`Weight: ${weightKg.toFixed(2)} kg`);
+    steps.push(`Exercise frequency (f): ${f} days/week`);
+    steps.push(`EEE = ((3.5 × 3.5 × ${weightKg.toFixed(2)}) / 200) × 60 × ${f}`);
+    const eeePerWorkout = ((3.5 * 3.5 * weightKg) / 200) * 60;
+    steps.push(`EEE per workout = ${eeePerWorkout.toFixed(2)} calories`);
+    const eee = eeePerWorkout * f;
+    steps.push(`Total EEE = ${eeePerWorkout.toFixed(2)} × ${f} = ${eee.toFixed(2)} calories/week`);
+    const eeePerDay = eee / 7;
+    steps.push(`EEE per day = ${eee.toFixed(2)} / 7 = ${eeePerDay.toFixed(2)} calories/day`);
+    return { eee: eeePerDay, steps };
+  };
+
+  const calculateNEAT = (): { neat: number; steps: string[] } => {
+    const steps: string[] = [];
+    const neat = 300; // Conservative estimate
+    steps.push(`**Non-Exercise Activity Thermogenesis (NEAT):**`);
+    steps.push(`NEAT represents daily activities like walking, fidgeting, etc.`);
+    steps.push(`Using conservative estimate: ${neat} calories/day`);
+    steps.push(`(This varies by lifestyle but we use a standard value)`);
+    return { neat, steps };
+  };
+
+  const calculateTDEE = (
+    bmr: number,
+    tef: number,
+    eee: number,
+    neat: number
+  ): { tdee: number; steps: string[] } => {
     const steps: string[] = [];
     steps.push(`**Total Daily Energy Expenditure (TDEE):**`);
-    steps.push(`Activity Level: ${activityMultipliers[activityLevel].label}`);
-    steps.push(`Multiplier: ${multiplier}`);
-    steps.push(`TDEE = BMR × Activity Multiplier`);
-    steps.push(`TDEE = ${bmr.toFixed(2)} × ${multiplier}`);
-    const tdee = bmr * multiplier;
+    steps.push(`TDEE = BMR + TEF + EEE + NEAT`);
+    steps.push(`TDEE = ${bmr.toFixed(2)} + ${tef.toFixed(2)} + ${eee.toFixed(2)} + ${neat.toFixed(2)}`);
+    const tdee = bmr + tef + eee + neat;
     steps.push(`TDEE = ${tdee.toFixed(2)} calories/day`);
     return { tdee, steps };
   };
@@ -191,8 +238,16 @@ export default function CalorieCalculator() {
     // Calculate BMR
     const { bmr, steps: bmrSteps } = calculateBMR(weight, height, age, userData.gender);
 
+    // Convert weight to kg for EEE calculation
+    const weightKg = weight * 0.453592;
+
+    // Calculate TDEE components
+    const { tef, steps: tefSteps } = calculateTEF(bmr);
+    const { eee, steps: eeeSteps } = calculateEEE(weightKg, userData.exerciseFrequency);
+    const { neat, steps: neatSteps } = calculateNEAT();
+
     // Calculate TDEE
-    const { tdee, steps: tdeeSteps } = calculateTDEE(bmr, userData.activityLevel);
+    const { tdee, steps: tdeeSteps } = calculateTDEE(bmr, tef, eee, neat);
 
     // Calculate Target Calories
     const { targetCalories, steps: calorieAdjustmentSteps } = calculateTargetCalories(tdee, userData.goal);
@@ -206,6 +261,9 @@ export default function CalorieCalculator() {
 
     setResults({
       bmr,
+      tef,
+      eee,
+      neat,
       tdee,
       targetCalories,
       protein,
@@ -215,6 +273,9 @@ export default function CalorieCalculator() {
 
     setSteps({
       bmrSteps,
+      tefSteps,
+      eeeSteps,
+      neatSteps,
       tdeeSteps,
       calorieAdjustmentSteps,
       proteinSteps,
@@ -279,16 +340,16 @@ export default function CalorieCalculator() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="activity">Activity Level</Label>
+              <Label htmlFor="exercise">Exercise Frequency</Label>
               <Select
-                value={userData.activityLevel}
-                onValueChange={(value: ActivityLevel) => setUserData({ ...userData, activityLevel: value })}
+                value={userData.exerciseFrequency}
+                onValueChange={(value: ExerciseFrequency) => setUserData({ ...userData, exerciseFrequency: value })}
               >
-                <SelectTrigger id="activity">
+                <SelectTrigger id="exercise">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(activityMultipliers).map(([key, { label }]) => (
+                  {Object.entries(exerciseFrequencyOptions).map(([key, label]) => (
                     <SelectItem key={key} value={key}>
                       {label}
                     </SelectItem>
@@ -333,21 +394,48 @@ export default function CalorieCalculator() {
                 <CardTitle>Your Results</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                    <div className="text-sm text-muted-foreground">BMR</div>
-                    <div className="text-2xl font-bold">{results.bmr.toFixed(0)}</div>
-                    <div className="text-xs text-muted-foreground">calories/day</div>
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Energy Expenditure Breakdown</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                      <div className="text-sm text-muted-foreground">BMR (Basal Metabolic Rate)</div>
+                      <div className="text-2xl font-bold">{results.bmr.toFixed(0)}</div>
+                      <div className="text-xs text-muted-foreground">calories/day</div>
+                    </div>
+                    <div className="p-4 bg-orange-50 dark:bg-orange-950 rounded-lg">
+                      <div className="text-sm text-muted-foreground">TEF (Thermic Effect of Feeding)</div>
+                      <div className="text-2xl font-bold">{results.tef.toFixed(0)}</div>
+                      <div className="text-xs text-muted-foreground">calories/day</div>
+                    </div>
+                    <div className="p-4 bg-pink-50 dark:bg-pink-950 rounded-lg">
+                      <div className="text-sm text-muted-foreground">EEE (Exercise Energy Expenditure)</div>
+                      <div className="text-2xl font-bold">{results.eee.toFixed(0)}</div>
+                      <div className="text-xs text-muted-foreground">calories/day</div>
+                    </div>
+                    <div className="p-4 bg-cyan-50 dark:bg-cyan-950 rounded-lg">
+                      <div className="text-sm text-muted-foreground">NEAT (Non-Exercise Activity Thermogenesis)</div>
+                      <div className="text-2xl font-bold">{results.neat.toFixed(0)}</div>
+                      <div className="text-xs text-muted-foreground">calories/day</div>
+                    </div>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg">
-                    <div className="text-sm text-muted-foreground">TDEE</div>
-                    <div className="text-2xl font-bold">{results.tdee.toFixed(0)}</div>
+                    <div className="text-sm text-muted-foreground">TDEE (Total Daily Energy Expenditure)</div>
+                    <div className="text-3xl font-bold">{results.tdee.toFixed(0)}</div>
                     <div className="text-xs text-muted-foreground">calories/day</div>
+                    <div className="text-xs text-muted-foreground mt-2">
+                      = BMR + TEF + EEE + NEAT
+                    </div>
                   </div>
                   <div className="p-4 bg-purple-50 dark:bg-purple-950 rounded-lg">
                     <div className="text-sm text-muted-foreground">Target Calories</div>
-                    <div className="text-2xl font-bold">{results.targetCalories.toFixed(0)}</div>
+                    <div className="text-3xl font-bold">{results.targetCalories.toFixed(0)}</div>
                     <div className="text-xs text-muted-foreground">calories/day</div>
+                    <div className="text-xs text-muted-foreground mt-2">
+                      = TDEE {goalAdjustments[userData.goal].value >= 0 ? "+" : ""} {goalAdjustments[userData.goal].value}
+                    </div>
                   </div>
                 </div>
 
@@ -413,7 +501,40 @@ export default function CalorieCalculator() {
                 </div>
 
                 <div className="space-y-3">
-                  <h3 className="text-lg font-semibold text-green-600">2. Total Daily Energy Expenditure (TDEE)</h3>
+                  <h3 className="text-lg font-semibold text-orange-600">2a. Thermic Effect of Feeding (TEF)</h3>
+                  <div className="pl-4 space-y-1 font-mono text-sm">
+                    {steps.tefSteps.map((step, i) => (
+                      <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                        {step.replace(/\*\*/g, "")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-pink-600">2b. Exercise Energy Expenditure (EEE)</h3>
+                  <div className="pl-4 space-y-1 font-mono text-sm">
+                    {steps.eeeSteps.map((step, i) => (
+                      <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                        {step.replace(/\*\*/g, "")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-cyan-600">2c. Non-Exercise Activity Thermogenesis (NEAT)</h3>
+                  <div className="pl-4 space-y-1 font-mono text-sm">
+                    {steps.neatSteps.map((step, i) => (
+                      <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
+                        {step.replace(/\*\*/g, "")}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-green-600">2d. Total Daily Energy Expenditure (TDEE)</h3>
                   <div className="pl-4 space-y-1 font-mono text-sm">
                     {steps.tdeeSteps.map((step, i) => (
                       <div key={i} className={step.startsWith("**") ? "font-bold text-foreground mt-2" : "text-muted-foreground"}>
