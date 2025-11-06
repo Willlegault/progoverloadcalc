@@ -289,18 +289,17 @@ export default function CalorieCalculator() {
 
     // Protein: g per lb of body weight with multiplier
     const baseProteinPerLb = 0.8;
-    const proteinPerLb = baseProteinPerLb * selectedProteinMultiplier;
     proteinSteps.push(`**Protein Calculation:**`);
     proteinSteps.push(`Base recommendation: ${baseProteinPerLb}g per lb of body weight`);
     proteinSteps.push(`Training goal: ${exerciseTypeOptions[exerciseType]}`);
     proteinSteps.push(`Exercise frequency: ${exerciseFrequencyOptions[exerciseFrequency]}`);
     proteinSteps.push(`Protein multiplier: ${selectedProteinMultiplier}`);
-    proteinSteps.push(`Adjusted recommendation: ${proteinPerLb.toFixed(2)}g per lb of body weight`);
+    proteinSteps.push(`Adjusted recommendation: ${selectedProteinMultiplier.toFixed(2)}g per lb of body weight`);
     if (weightUnit === "kg") {
       proteinSteps.push(`Weight: ${weight} kg = ${weightLbs.toFixed(2)} lbs`);
     }
-    proteinSteps.push(`Protein = ${weightLbs.toFixed(2)} lbs × ${proteinPerLb.toFixed(2)}g/lb`);
-    const proteinGrams = weightLbs * proteinPerLb;
+    proteinSteps.push(`Protein = ${weightLbs.toFixed(2)} lbs × ${selectedProteinMultiplier.toFixed(2)}g/lb`);
+    const proteinGrams = weightLbs * selectedProteinMultiplier;
     proteinSteps.push(`Protein = ${proteinGrams.toFixed(1)}g`);
     const proteinCalories = proteinGrams * 4;
     proteinSteps.push(`Protein Calories = ${proteinGrams.toFixed(1)}g × 4 cal/g = ${proteinCalories.toFixed(1)} calories`);
