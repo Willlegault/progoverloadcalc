@@ -1,4 +1,4 @@
-import CalorieCalculator from "@/components/CalorieCalculator";
+import CalorieCalculator from "@/components/CalorieCalculator"; 
 
 export default function Home() {
   return (
