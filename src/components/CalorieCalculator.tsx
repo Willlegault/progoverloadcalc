@@ -10,15 +10,19 @@ import { Button } from "@/components/ui/button";
 
 type Gender = "male" | "female";
 type ExerciseFrequency = "1" | "2" | "3" | "4" | "5";
-type Goal = "lose" | "maintain" | "gain";
+type Goal = "loseMax" | "loseMid" | "loseMin" | "maintain" | "gainMin" | "gainMid" | "gainMax";
+type ExerciseType = "strength" | "endurance" | "hypertrophy";
+type WeightUnit = "lbs" | "kg";
+type HeightUnit = "in" | "cm";
 
 interface UserData {
   age: string;
   gender: Gender;
-  weight: string; // in lbs
-  height: string; // in inches
+  weight: string;
+  height: string;
   exerciseFrequency: ExerciseFrequency;
   goal: Goal;
+  exerciseType: ExerciseType;
 }
 
 interface Results {
@@ -54,10 +58,20 @@ const exerciseFrequencyOptions = {
 };
 
 const goalAdjustments = {
-  lose: { value: -500, label: "Lose weight (-500 cal/day, ~1 lb/week)" },
+  loseMax: { value: -1000, label: "Lose weight (-1000 cal/day, ~2 lb/week)" },
+  loseMid: { value: -750, label: "Lose weight (-750 cal/day, ~1.5 lb/week)" },
+  loseMin: { value: -500, label: "Lose weight (-500 cal/day, ~1 lb/week)" },
   maintain: { value: 0, label: "Maintain weight" },
-  gain: { value: 300, label: "Gain weight (+300 cal/day, ~0.6 lb/week)" },
+  gainMin: { value: 500, label: "Gain weight (+500 cal/day, ~1 lb/week)" },
+  gainMid: { value: 750, label: "Gain weight (+750 cal/day, ~1.5 lb/week)" },
+  gainMax: { value: 1000, label: "Gain weight (+1000 cal/day, ~2 lb/week)" },
 };
+
+const exerciseTypeOptions = {
+  "strength": "Strength Training",
+  "endurance": "Endurance Training",
+  "hypertrophy": "Hypertrophy Training"
+}
 
 export default function CalorieCalculator() {
   const [userData, setUserData] = useState<UserData>({
@@ -67,21 +81,38 @@ export default function CalorieCalculator() {
     height: "",
     exerciseFrequency: "3",
     goal: "maintain",
+    exerciseType: "strength",
   });
+
+  const [weightUnit, setWeightUnit] = useState<WeightUnit>("lbs");
+  const [heightUnit, setHeightUnit] = useState<HeightUnit>("in");
 
   const [results, setResults] = useState<Results | null>(null);
   const [steps, setSteps] = useState<CalculationSteps | null>(null);
 
-  const calculateBMR = (weight: number, height: number, age: number, gender: Gender): { bmr: number; steps: string[] } => {
-    // Convert lbs to kg and inches to cm
-    const weightKg = weight * 0.453592;
-    const heightCm = height * 2.54;
+  const calculateBMR = (
+    weight: number,
+    height: number,
+    age: number,
+    gender: Gender,
+    weightUnit: WeightUnit,
+    heightUnit: HeightUnit
+  ): { bmr: number; steps: string[] } => {
+    // Convert to kg and cm if needed
+    const weightKg = weightUnit === "lbs" ? weight * 0.453592 : weight;
+    const heightCm = heightUnit === "in" ? height * 2.54 : height;
 
     const steps: string[] = [];
-    steps.push(`**Convert Units:**`);
-    steps.push(`Weight: ${weight} lbs × 0.453592 = ${weightKg.toFixed(2)} kg`);
-    steps.push(`Height: ${height} inches × 2.54 = ${heightCm.toFixed(2)} cm`);
-    steps.push("");
+    if (weightUnit === "lbs" || heightUnit === "in") {
+      steps.push(`**Convert Units:**`);
+      if (weightUnit === "lbs") {
+        steps.push(`Weight: ${weight} lbs × 0.453592 = ${weightKg.toFixed(2)} kg`);
+      }
+      if (heightUnit === "in") {
+        steps.push(`Height: ${height} inches × 2.54 = ${heightCm.toFixed(2)} cm`);
+      }
+      steps.push("");
+    }
 
     // Mifflin-St Jeor Equation
     steps.push(`**Mifflin-St Jeor Equation:**`);
@@ -113,13 +144,24 @@ export default function CalorieCalculator() {
     return { tef, steps };
   };
 
-  const calculateEEE = (weightKg: number, exerciseFrequency: ExerciseFrequency): { eee: number; steps: string[] } => {
+  const calculateEEE = (
+    weight: number,
+    weightUnit: WeightUnit,
+    exerciseFrequency: ExerciseFrequency
+  ): { eee: number; steps: string[] } => {
     const steps: string[] = [];
     const f = parseInt(exerciseFrequency);
+    // Convert to kg if needed
+    const weightKg = weightUnit === "lbs" ? weight * 0.453592 : weight;
+    
     steps.push(`**Exercise Energy Expenditure (EEE):**`);
     steps.push(`Formula for one workout: EEE = ((3.5 × 3.5 × weight_kg) / 200) × 60 × f`);
     steps.push(`where f = exercise frequency per week`);
-    steps.push(`Weight: ${weightKg.toFixed(2)} kg`);
+    if (weightUnit === "lbs") {
+      steps.push(`Weight: ${weight} ${weightUnit} = ${weightKg.toFixed(2)} kg`);
+    } else {
+      steps.push(`Weight: ${weight} ${weightUnit}`);
+    }
     steps.push(`Exercise frequency (f): ${f} days/week`);
     steps.push(`EEE = ((3.5 × 3.5 × ${weightKg.toFixed(2)}) / 200) × 60 × ${f}`);
     const eeePerWorkout = ((3.5 * 3.5 * weightKg) / 200) * 60;
@@ -172,7 +214,10 @@ export default function CalorieCalculator() {
   const calculateMacros = (
     targetCalories: number,
     weight: number,
-    goal: Goal
+    weightUnit: WeightUnit,
+    goal: Goal,
+    exerciseType: ExerciseType,
+    exerciseFrequency: ExerciseFrequency
   ): {
     protein: number;
     fat: number;
@@ -184,26 +229,96 @@ export default function CalorieCalculator() {
     const proteinSteps: string[] = [];
     const fatSteps: string[] = [];
     const carbSteps: string[] = [];
+    
+    // Convert weight to lbs for protein calculation (formula uses lbs)
+    const weightLbs = weightUnit === "kg" ? weight * 2.20462 : weight;
 
-    // Protein: 0.8-1g per lb of body weight (higher for fat loss)
-    const proteinPerLb = goal === "lose" ? 1.0 : goal === "gain" ? 0.9 : 0.8;
+    // Protein multipliers based on training goal and frequency
+    const proteinMultiplier: Record<ExerciseType, Record<ExerciseFrequency, number>> = {
+      strength: {
+        "1": 0.7,
+        "2": 0.85,
+        "3": 0.95,
+        "4": 1.1,
+        "5": 1.25,
+      },
+      endurance: {
+        "1": 0.7,
+        "2": 0.8,
+        "3": 0.9,
+        "4": 0.95,
+        "5": 1.0,
+      },
+      hypertrophy: {
+        "1": 0.7,
+        "2": 0.85,
+        "3": 0.95,
+        "4": 1.1,
+        "5": 1.25,
+      },
+    };
+
+    const selectedProteinMultiplier = proteinMultiplier[exerciseType]?.[exerciseFrequency] ?? 0.8;
+
+    // Fat multipliers based on training goal (grams per lb of body weight)
+    const fatMultiplier: Record<ExerciseType, Record<ExerciseFrequency, number>> = {
+      strength: {
+        "1": 0.45,
+        "2": 0.45,
+        "3": 0.45,
+        "4": 0.45,
+        "5": 0.45,
+      },
+      endurance: {
+        "1": 0.4,
+        "2": 0.4,
+        "3": 0.4,
+        "4": 0.4,
+        "5": 0.4,
+      },
+      hypertrophy: {
+        "1": 0.36,
+        "2": 0.36,
+        "3": 0.36,
+        "4": 0.36,
+        "5": 0.36,
+      },
+    };
+
+    const selectedFatMultiplier = fatMultiplier[exerciseType]?.[exerciseFrequency] ?? 0.4;
+
+    // Protein: g per lb of body weight with multiplier
+    const baseProteinPerLb = 0.8;
+    const proteinPerLb = baseProteinPerLb * selectedProteinMultiplier;
     proteinSteps.push(`**Protein Calculation:**`);
-    proteinSteps.push(`Recommendation: ${proteinPerLb}g per lb of body weight`);
-    proteinSteps.push(`Protein = ${weight} lbs × ${proteinPerLb}g/lb`);
-    const proteinGrams = weight * proteinPerLb;
+    proteinSteps.push(`Base recommendation: ${baseProteinPerLb}g per lb of body weight`);
+    proteinSteps.push(`Training goal: ${exerciseTypeOptions[exerciseType]}`);
+    proteinSteps.push(`Exercise frequency: ${exerciseFrequencyOptions[exerciseFrequency]}`);
+    proteinSteps.push(`Protein multiplier: ${selectedProteinMultiplier}`);
+    proteinSteps.push(`Adjusted recommendation: ${proteinPerLb.toFixed(2)}g per lb of body weight`);
+    if (weightUnit === "kg") {
+      proteinSteps.push(`Weight: ${weight} kg = ${weightLbs.toFixed(2)} lbs`);
+    }
+    proteinSteps.push(`Protein = ${weightLbs.toFixed(2)} lbs × ${proteinPerLb.toFixed(2)}g/lb`);
+    const proteinGrams = weightLbs * proteinPerLb;
     proteinSteps.push(`Protein = ${proteinGrams.toFixed(1)}g`);
     const proteinCalories = proteinGrams * 4;
     proteinSteps.push(`Protein Calories = ${proteinGrams.toFixed(1)}g × 4 cal/g = ${proteinCalories.toFixed(1)} calories`);
 
-    // Fat: 25-30% of total calories
-    const fatPercentage = 0.28;
+    // Fat: grams per lb of body weight with multiplier
+    const fatPerLb = selectedFatMultiplier;
     fatSteps.push(`**Fat Calculation:**`);
-    fatSteps.push(`Recommendation: ${(fatPercentage * 100).toFixed(0)}% of total calories`);
-    fatSteps.push(`Fat Calories = ${targetCalories.toFixed(2)} × ${fatPercentage}`);
-    const fatCalories = targetCalories * fatPercentage;
-    fatSteps.push(`Fat Calories = ${fatCalories.toFixed(1)} calories`);
-    const fatGrams = fatCalories / 9;
-    fatSteps.push(`Fat = ${fatCalories.toFixed(1)} ÷ 9 cal/g = ${fatGrams.toFixed(1)}g`);
+    fatSteps.push(`Training goal: ${exerciseTypeOptions[exerciseType]}`);
+    fatSteps.push(`Exercise frequency: ${exerciseFrequencyOptions[exerciseFrequency]}`);
+    fatSteps.push(`Fat multiplier: ${fatPerLb.toFixed(2)}g per lb of body weight`);
+    if (weightUnit === "kg") {
+      fatSteps.push(`Weight: ${weight} kg = ${weightLbs.toFixed(2)} lbs`);
+    }
+    fatSteps.push(`Fat = ${weightLbs.toFixed(2)} lbs × ${fatPerLb.toFixed(2)}g/lb`);
+    const fatGrams = weightLbs * fatPerLb;
+    fatSteps.push(`Fat = ${fatGrams.toFixed(1)}g`);
+    const fatCalories = fatGrams * 9;
+    fatSteps.push(`Fat Calories = ${fatGrams.toFixed(1)}g × 9 cal/g = ${fatCalories.toFixed(1)} calories`);
 
     // Carbs: Remaining calories
     carbSteps.push(`**Carbohydrate Calculation:**`);
@@ -226,24 +341,22 @@ export default function CalorieCalculator() {
   };
 
   const handleCalculate = () => {
-    const weight = parseFloat(userData.weight);
-    const height = parseFloat(userData.height);
-    const age = parseInt(userData.age);
+    // Use placeholder values if fields are empty
+    const weight = parseFloat(userData.weight || "150");
+    const height = parseFloat(userData.height || "68");
+    const age = parseInt(userData.age || "20");
 
-    if (!weight || !height || !age) {
+    if (!weight || !height || !age || isNaN(weight) || isNaN(height) || isNaN(age)) {
       alert("Please fill in all fields with valid numbers");
       return;
     }
 
     // Calculate BMR
-    const { bmr, steps: bmrSteps } = calculateBMR(weight, height, age, userData.gender);
-
-    // Convert weight to kg for EEE calculation
-    const weightKg = weight * 0.453592;
+    const { bmr, steps: bmrSteps } = calculateBMR(weight, height, age, userData.gender, weightUnit, heightUnit);
 
     // Calculate TDEE components
     const { tef, steps: tefSteps } = calculateTEF(bmr);
-    const { eee, steps: eeeSteps } = calculateEEE(weightKg, userData.exerciseFrequency);
+    const { eee, steps: eeeSteps } = calculateEEE(weight, weightUnit, userData.exerciseFrequency);
     const { neat, steps: neatSteps } = calculateNEAT();
 
     // Calculate TDEE
@@ -256,7 +369,10 @@ export default function CalorieCalculator() {
     const { protein, fat, carbs, proteinSteps, fatSteps, carbSteps } = calculateMacros(
       targetCalories,
       weight,
-      userData.goal
+      weightUnit,
+      userData.goal,
+      userData.exerciseType,
+      userData.exerciseFrequency
     );
 
     setResults({
@@ -298,9 +414,15 @@ export default function CalorieCalculator() {
               <Input
                 id="age"
                 type="number"
-                placeholder="25"
+                min={0}
                 value={userData.age}
-                onChange={(e) => setUserData({ ...userData, age: e.target.value })}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setUserData({
+                    ...userData,
+                    age: value === "" ? "" : Math.max(0, Number(value)).toString(),
+                  });
+                }}
               />
             </div>
 
@@ -318,25 +440,97 @@ export default function CalorieCalculator() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="weight">Weight (lbs)</Label>
-              <Input
-                id="weight"
-                type="number"
-                placeholder="150"
-                value={userData.weight}
-                onChange={(e) => setUserData({ ...userData, weight: e.target.value })}
-              />
+              <Label htmlFor="weight">Weight ({weightUnit})</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="weight"
+                  type="number"
+                  min={0}
+                  value={userData.weight}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setUserData({
+                      ...userData,
+                      weight: value === "" ? "" : Math.max(0, Number(value)).toString(),
+                    });
+                  }}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const currentWeight = parseFloat(userData.weight);
+                    if (!isNaN(currentWeight) && currentWeight > 0) {
+                      // Convert value when switching units
+                      const convertedWeight = weightUnit === "lbs" 
+                        ? (currentWeight * 0.453592).toFixed(2)
+                        : (currentWeight / 0.453592).toFixed(2);
+                      setUserData({
+                        ...userData,
+                        weight: convertedWeight,
+                      });
+                    }
+                    setWeightUnit(weightUnit === "lbs" ? "kg" : "lbs");
+                  }}
+                  className="min-w-[80px] px-3"
+                >
+                  <span className={weightUnit === "lbs" ? "font-semibold text-foreground" : "font-normal text-muted-foreground"}>
+                    lbs
+                  </span>
+                  <span className="mx-1 text-muted-foreground">/</span>
+                  <span className={weightUnit === "kg" ? "font-semibold text-foreground" : "font-normal text-muted-foreground"}>
+                    kg
+                  </span>
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="height">Height (inches)</Label>
-              <Input
-                id="height"
-                type="number"
-                placeholder="68"
-                value={userData.height}
-                onChange={(e) => setUserData({ ...userData, height: e.target.value })}
-              />
+              <Label htmlFor="height">Height ({heightUnit === "in" ? "inches" : "cm"})</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="height"
+                  type="number"
+                  min={0}
+                  value={userData.height}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setUserData({
+                      ...userData,
+                      height: value === "" ? "" : Math.max(0, Number(value)).toString(),
+                    });
+                  }}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const currentHeight = parseFloat(userData.height);
+                    if (!isNaN(currentHeight) && currentHeight > 0) {
+                      // Convert value when switching units
+                      const convertedHeight = heightUnit === "in" 
+                        ? (currentHeight * 2.54).toFixed(2)
+                        : (currentHeight / 2.54).toFixed(2);
+                      setUserData({
+                        ...userData,
+                        height: convertedHeight,
+                      });
+                    }
+                    setHeightUnit(heightUnit === "in" ? "cm" : "in");
+                  }}
+                  className="min-w-[80px] px-3"
+                >
+                  <span className={heightUnit === "in" ? "font-semibold text-foreground" : "font-normal text-muted-foreground"}>
+                    in
+                  </span>
+                  <span className="mx-1 text-muted-foreground">/</span>
+                  <span className={heightUnit === "cm" ? "font-semibold text-foreground" : "font-normal text-muted-foreground"}>
+                    cm
+                  </span>
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -359,7 +553,26 @@ export default function CalorieCalculator() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="goal">Goal</Label>
+              <Label htmlFor="exerciseType">Exercise Goal</Label>
+              <Select
+                value={userData.exerciseType}
+                onValueChange={(value: ExerciseType) => setUserData({ ...userData, exerciseType: value })}
+              >
+                <SelectTrigger id="exerciseType">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(exerciseTypeOptions).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="goal">Nutrition Goal</Label>
               <Select value={userData.goal} onValueChange={(value: Goal) => setUserData({ ...userData, goal: value })}>
                 <SelectTrigger id="goal">
                   <SelectValue />
@@ -469,7 +682,7 @@ export default function CalorieCalculator() {
                 <div className="p-4 bg-muted rounded-lg">
                   <h4 className="font-semibold mb-2">Summary</h4>
                   <p className="text-sm text-muted-foreground">
-                    To {userData.goal === "lose" ? "lose weight" : userData.goal === "gain" ? "gain weight" : "maintain your weight"}, 
+                    To {userData.goal === "loseMax" ? "lose weight" : userData.goal === "loseMid" ? "lose weight" : userData.goal === "loseMin" ? "lose weight" : userData.goal === "maintain" ? "maintain your weight" : userData.goal === "gainMin" ? "gain weight" : userData.goal === "gainMid" ? "gain weight" : "gain weight"}, 
                     consume <span className="font-bold text-foreground">{results.targetCalories.toFixed(0)} calories</span> per day with{" "}
                     <span className="font-bold text-red-600">{results.protein.toFixed(0)}g protein</span>,{" "}
                     <span className="font-bold text-yellow-600">{results.fat.toFixed(0)}g fat</span>, and{" "}
