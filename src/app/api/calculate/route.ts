@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  e1rmPerformance,
+  e1rmPerceived,
+  NSCA_BASE_ROW,
+  loadFromBaselineUsingPercent,
+  getPercentFromRPETable,
+} from "@/lib/rpe_progression";
+import { ZONE_PRESETS, clampToZoneReps, isInTopOfRange, isBelowRange } from "@/lib/zones";
 
 /*
  Progressive overload workout generator
@@ -53,51 +61,6 @@ interface CalculateRequest {
     weightUnit?: WeightUnit;
 }
 
-const RPE_PERCENT: Record<number, number> = {
-    // mapping integer RPE -> %1RM (examples, adjustable)
-    10: 1.0,
-    9: 0.97,
-    8: 0.92,
-    7: 0.87,
-    6: 0.83,
-    5: 0.79,
-};
-
-const GOAL_INTENSITY: Record<Goal, number> = {
-    STRENGTH: 0.925,
-    HYPERTROPHY: 0.75,
-    ENDURANCE: 0.575,
-};
-
-const GOAL_REPS: Record<Goal, number> = {
-    STRENGTH: 5,
-    HYPERTROPHY: 10,
-    ENDURANCE: 15,
-};
-
-const GOAL_SETS: Record<Goal, number> = {
-    STRENGTH: 3,
-    HYPERTROPHY: 4,
-    ENDURANCE: 3,
-};
-
-function rpeFromRIR(rir: number): number {
-    // simple inference: RPE = 10 - RIR
-    const r = 10 - (isFinite(rir) ? rir : 2);
-    if (r >= 10) return 10;
-    if (r <= 5) return 5;
-    return Math.round(r);
-}
-
-function percentFromRPE(rpe: number): number {
-    return RPE_PERCENT[rpe] ?? 0.92; // default to RPE 8 if unknown
-}
-
-function epley1RM(weight: number, reps: number, rir = 0): number {
-    // Epley's formula using reps + RIR per user's spec
-    return weight * (1 + (reps + rir) / 30);
-}
-
 function roundToNearest25lbs(lbs: number): number {
     // rounds to nearest 2.5 lbs
     return Math.round(lbs / 2.5) * 2.5;
@@ -124,65 +87,138 @@ export async function POST(req: Request) {
         }
 
         const exercises = previousWorkout.exerciseInstances.map((ex) => {
-            // compute per-set metrics
-            const sets = (ex.sets || []).map((s) => {
-                const rir = s.rir ?? 2; // default RIR if missing
-                const rpe = rpeFromRIR(rir);
-                const percent = percentFromRPE(rpe);
-                const perceived1RM = s.weight / percent; // weight at RPE -> 1RM
-                const epley = epley1RM(s.weight, s.reps, rir);
-                const volume = s.weight * s.reps;
-                return { ...s, rir, rpe, percent, perceived1RM, epley, volume };
-            });
+            // Find top set by maximum Epley score
+            let topSet = null;
+            let maxEpleyScore = 0;
 
-            // pick representative 1RM: use the max of perceived and epley across sets
-            const maxPerceived = Math.max(...sets.map((ss) => ss.perceived1RM));
-            const maxEpley = Math.max(...sets.map((ss) => ss.epley));
-            const representative1RM = Math.max(maxPerceived, maxEpley);
+            for (const s of ex.sets || []) {
+                const rir = s.rir ?? 2;
+                const epleyScore = e1rmPerformance(s.weight, s.reps, rir);
+                
+                if (epleyScore > maxEpleyScore) {
+                    maxEpleyScore = epleyScore;
+                    topSet = { ...s, rir };
+                }
+            }
+
+            if (!topSet) {
+                return {
+                    id: ex.id,
+                    name: ex.name,
+                    group: ex.group,
+                    topSet: null,
+                    estimated1RM: 0,
+                    perceived1RM: 0,
+                };
+            }
+
+            // Calculate both 1RM estimates
+            const perRirDropPct = 2.0;
+            const estimated1RM = e1rmPerformance(topSet.weight, topSet.reps, topSet.rir);
+            const perceived1RM = e1rmPerceived(
+                topSet.weight,
+                topSet.reps,
+                topSet.rir,
+                NSCA_BASE_ROW,
+                perRirDropPct
+            );
+
+            // Always use perceived1RM (RPE-based) for progressive overload
+            // RPE already accounts for how the user feels and progressive overload
+            const currentBaseline = perceived1RM;
+            
+            // Calculate RPE and chart percentage for details
+            const rpe = 10 - topSet.rir;
+            const rpeChartPercent = getPercentFromRPETable(topSet.reps, rpe);
 
             return {
                 id: ex.id,
                 name: ex.name,
                 group: ex.group,
-                sets,
-                representative1RM,
+                topSet: { ...topSet, rpe },
+                estimated1RM,
+                perceived1RM,
+                currentBaseline,
+                rpeChartPercent,
             };
         });
 
         // Build recommendations using goal from previous workout if present, else default to HYPERTROPHY
         const goal: Goal = (previousWorkout.goal as Goal) ?? "HYPERTROPHY";
+        const zonePreset = ZONE_PRESETS[goal];
+        const roundIncrement = 2.5;
 
         const recommendedExercises = exercises.map((ex) => {
-            const targetIntensity = GOAL_INTENSITY[goal];
-            const targetReps = GOAL_REPS[goal];
-            const setsCount = GOAL_SETS[goal];
+            if (!ex.topSet || !ex.currentBaseline) {
+                return {
+                    id: ex.id,
+                    name: ex.name,
+                    group: ex.group,
+                    perceived1RM: 0,
+                    estimated1RM: 0,
+                    topSetRPE: 0,
+                    recommended: {
+                        targetPercentRange: `${zonePreset.low}-${zonePreset.high}%`,
+                        targetReps: `${zonePreset.defaultReps}`,
+                        sets: [],
+                    },
+                };
+            }
 
-            // compute raw target weight (use lbs for rounding logic)
-            const rep1rmLbs = toLbs(ex.representative1RM, unit);
-            let targetLbs = rep1rmLbs * targetIntensity;
-            // round to nearest 2.5 lbs
-            targetLbs = roundToNearest25lbs(targetLbs);
-            const targetWeight = fromLbs(targetLbs, unit);
+            // Determine if we should adjust weight based on performance
+            const topSet = ex.topSet;
+            const inTopOfRange = isInTopOfRange(topSet.reps, topSet.rir, goal);
+            const belowRange = isBelowRange(topSet.reps, topSet.rir, goal);
 
-            const newSets = Array.from({ length: setsCount }).map((_, idx) => ({
+            // Calculate base target weight from baseline
+            const targetReps = clampToZoneReps(goal, zonePreset.defaultReps);
+            const targetRIR = zonePreset.targetRIR;
+            
+            let plannedWeight = loadFromBaselineUsingPercent(
+                ex.currentBaseline,
+                targetReps,
+                targetRIR,
+                roundIncrement
+            );
+
+            // Apply progressive overload adjustments
+            if (inTopOfRange) {
+                plannedWeight = Math.max(roundIncrement, plannedWeight + roundIncrement);
+            } else if (belowRange) {
+                plannedWeight = Math.max(roundIncrement, plannedWeight - roundIncrement);
+            }
+
+            // Convert to lbs for rounding, then back to user's unit
+            const plannedLbs = toLbs(plannedWeight, unit);
+            const roundedLbs = roundToNearest25lbs(plannedLbs);
+            const finalWeight = fromLbs(roundedLbs, unit);
+
+            const newSets = Array.from({ length: zonePreset.sets }).map((_, idx) => ({
                 setIndex: idx + 1,
-                weight: Number(targetWeight.toFixed(2)),
+                weight: Number(finalWeight.toFixed(2)),
                 reps: targetReps,
-                rir: 2,
-                notes: `Generated from representative 1RM ${ex.representative1RM.toFixed(2)} ${unit} using intensity ${(
-                    targetIntensity * 100
-                ).toFixed(1)}%`,
+                rir: targetRIR,
+                notes: `Zone: ${goal}, Perceived 1RM: ${ex.currentBaseline.toFixed(1)} ${unit}`,
             }));
 
             return {
                 id: ex.id,
                 name: ex.name,
                 group: ex.group,
+                perceived1RM: Number(ex.perceived1RM.toFixed(2)),
+                estimated1RM: Number(ex.estimated1RM.toFixed(2)),
+                topSetRPE: ex.topSet.rpe,
                 recommended: {
-                    representative1RM: Number(ex.representative1RM.toFixed(2)),
-                    targetIntensity,
-                    targetReps,
-                    sets: newSets,
+                    targetPercentRange: `${zonePreset.low}-${zonePreset.high}%`,
+                    targetReps: `${targetReps}`,
+                    sets: newSets.map(set => ({
+                        setIndex: set.setIndex,
+                        weight: set.weight,
+                        reps: set.reps,
+                        targetRPE: 10 - set.rir,
+                        percentOf1RM: Number(((set.weight / ex.perceived1RM) * 100).toFixed(1)),
+                        notes: set.notes,
+                    })),
                 },
             };
         });
@@ -199,7 +235,23 @@ export async function POST(req: Request) {
             exerciseInstances: recommendedExercises,
         };
 
-        const res = NextResponse.json({ newWorkout, details: { exercises } });
+        // Format calculation details for frontend
+        const details = {
+            exercises: exercises.map((ex) => ({
+                name: ex.name,
+                topSet: {
+                    weight: ex.topSet?.weight ?? 0,
+                    reps: ex.topSet?.reps ?? 0,
+                    rir: ex.topSet?.rir ?? 0,
+                    rpe: ex.topSet?.rpe ?? 0,
+                },
+                perceived1RM: ex.perceived1RM,
+                estimated1RM: ex.estimated1RM,
+                rpeChartPercent: ex.rpeChartPercent ?? 0,
+            })),
+        };
+
+        const res = NextResponse.json({ newWorkout, details });
         setCors(res);
         return res;
     } catch (err) {
@@ -225,7 +277,7 @@ function setCors(res: NextResponse) {
         res.headers.set("Access-Control-Allow-Origin", "http://localhost:3000");
         res.headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
         res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    } catch (e) {
+    } catch {
         // no-op in case headers are immutable in some contexts
     }
 }

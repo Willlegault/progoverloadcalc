@@ -7,8 +7,9 @@ export default function Home() {
         <div className="text-center space-y-4 mb-8">
           <h1 className="text-4xl font-bold tracking-tight">Progressive Overload Calculator</h1>
           <p className="text-muted-foreground max-w-2xl">
-            Generate your next workout with progressive overload recommendations based on your previous workout data.
-            Uses Epley&apos;s formula and RPE-based calculations to optimize your training progression.
+            Enter your previous top sets to generate your next workout. We calculate both <strong>Perceived 1RM</strong> (RPE-based) 
+            and <strong>Estimated 1RM</strong> (Epley&apos;s formula), then use your Perceived 1RM for progressive overload recommendations 
+            that account for how you felt during your lifts.
           </p>
         </div>
         <ProgressiveOverloadCalculator />
